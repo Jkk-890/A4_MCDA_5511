@@ -27,3 +27,22 @@ class NewModel(nn.Module):
     
 
 model = NewModel(output_layers = [7, 8]).to('cuda:0')
+
+prompt = (
+    "In a shocking finding, scientists discovered a herd of unicorns living in a remote, "
+    "previously unexplored valley, in the Andes Mountains. Even more surprising to the "
+    "researchers was the fact that the unicorns spoke perfect English."
+)
+
+input_ids = model.tokenizer(prompt, return_tensors="pt").input_ids
+
+gen_tokens = model.pretrained.generate(
+    input_ids,
+    do_sample=True,
+    temperature=0.9,
+    max_length=100,
+)
+gen_text = model.tokenizer.batch_decode(gen_tokens)[0]
+
+print(gen_text)
+print(model.selected_out.keys())

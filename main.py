@@ -9,22 +9,26 @@ import json
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 
-
 class NewModel(nn.Module):
     def __init__(self, *args):
         super().__init__(*args)
         self.pretrained = AutoModelForCausalLM.from_pretrained("unsloth/Meta-Llama-3.1-8B-Instruct")
         self.tokenizer = AutoTokenizer.from_pretrained("unsloth/Meta-Llama-3.1-8B-Instruct")
-        self.output_layers = [1]
+        
+        self.output_layers = [1]  # Specify the layer indices you want
         self.selected_out = OrderedDict()
         self.fhooks = []
 
-        for i,l in enumerate(list(self.pretrained._modules.keys())):
-            if i in self.output_layers:
-                self.fhooks.append(getattr(self.pretrained,l).register_forward_hook(self.forward_hook(l)))
-
-    def forward_hook(self,layer_name):
+        # Register hooks for the layers
+        for i, l in enumerate(list(self.pretrained._modules.keys())):
+            if i in self.output_layers:  # Check if layer should be hooked
+                layer = getattr(self.pretrained, l)
+                self.fhooks.append(layer.register_forward_hook(self.forward_hook(l)))
+                
+    def forward_hook(self, layer_name):
+        """This function returns the hook function to be registered."""
         def hook(module, input, output):
+            # Store output in selected_out using layer_name as key
             self.selected_out[layer_name] = output
         return hook
 
@@ -33,17 +37,19 @@ class NewModel(nn.Module):
         return out, self.selected_out
 
 
+# Setup device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Now, move the model to the appropriate device
+# Move model to the correct device
 model = NewModel().to(device)
 
-prompt = (
-    "Where is the best place to go for a vacation in the summer?"
-)
+# Define a sample prompt
+prompt = "Where is the best place to go for a vacation in the summer?"
 
+# Tokenize the input prompt
 input_ids = model.tokenizer(prompt, return_tensors="pt").input_ids.to(device)
 
+# Generate text using the model
 gen_tokens = model.pretrained.generate(
     input_ids,
     do_sample=True,
@@ -52,14 +58,16 @@ gen_tokens = model.pretrained.generate(
 )
 gen_text = model.tokenizer.batch_decode(gen_tokens)[0]
 
+# Print generated text
 print(gen_text)
-# Print the raw tensor output (before flattening)
+
+# Print the raw tensor output from the selected output layers
 print([value for value in model.selected_out.values()])
 
 # Extract the tensor from the selected output layers (assuming it's the first item)
 tensor = list(model.selected_out.values())[0]
 
-# Move the tensor to CPU (if it's on GPU)
+# Move the tensor to CPU if it's on GPU
 tensor_cpu = tensor.cpu()
 
 # Convert the tensor to a NumPy array
@@ -67,6 +75,7 @@ numpy_array = tensor_cpu.detach().numpy()  # Detach from computation graph
 
 # Flatten the numpy array and save it to a text file
 np.savetxt('tensor_output.txt', numpy_array.flatten())  # Flatten to store as a single line of numbers
+
 
 ##############
 
@@ -80,10 +89,10 @@ class ActivationDatasetGenerator:
         self.activations = []
 
         def hook_fn(module, input, output):
-            self.activations = output[0].detach().cpu().numpy()  # Overwrite, not append
+            self.activations = output[0].detach().cpu().numpy()  # Overwrite, not appendnv
 
-        # Access the correct layer (layer 16 in this case)
-        self.hook_layer = self.model.model.layers[16]
+        # Access the middle layer (layer 10 in this case)
+        self.hook_layer = self.model.model.layers[10]
         self.hook_handle = self.hook_layer.register_forward_hook(hook_fn)
 
     def generate_text_and_activations(self, prompt, max_length=50):
@@ -113,13 +122,14 @@ class ActivationDatasetGenerator:
         with open(save_path, "w") as f:
             json.dump(dataset, f, indent=4)
         print(f"Dataset saved to {save_path}")
+        
+    def get_layers(self):
+        return [layer for layer in self.model.model.layers]
 
 # Example usage
 prompts = [
     "What is the best way to learn machine learning?",
     "Explain quantum computing in simple terms.",
-    "Tell me a joke about programming.",
-    "What happens if you fall into a black hole?",
     "Describe the future of artificial intelligence.",
     "Write a Python function to reverse a linked list.",
     "Explain why recursion is useful in programming.",
@@ -131,10 +141,95 @@ prompts = [
     "Explain the difference between supervised and unsupervised learning.",
     "Write python function to generate random numbers",
     "What happens when you type a URL into a browser?",
-    "Explain the concept of cloud computing in simple terms."
+    "How do compiled languages differ from interpreted ones?",
+    "Can you explain what a variable is in the context of programming?",
+    "What role do comments play in your code?",
+    "What exactly is a function, and how is it used?",
+    "How would you define an algorithm?",
+    "What distinguishes a stack from a queue in programming?",
+    "What is recursion, and when would you use it?",
+    "In what ways do a for loop and a while loop differ?",
+    "What does the term 'data structure' mean in programming?",
+    "Can you explain the difference between an array and a linked list?",
+    "What does object-oriented programming (OOP) involve?",
+    "What are the four core principles of object-oriented programming?",
+    "What is an interface, and why is it important in OOP?",
+    "How do you define a class in programming?",
+    "What does inheritance mean in object-oriented programming?",
+    "Can you explain polymorphism and how it's applied in OOP?",
+    "What does encapsulation refer to in the context of OOP?",
+    "What is abstraction, and how does it help in software design?",
+    "What is the distinction between reference types and value types?",
+    "What exactly are design patterns, and why are they used?",
+    "How do Python and Java differ from one another?",
+    "Why is static typing beneficial in some languages, such as Java?",
+    "What is dynamic typing, and how does it work in languages like Python?",
+    "What are the advantages of using functional programming techniques?",
+    "What purpose does the `self` keyword serve in Python?",
+    "How does JavaScript handle asynchronous programming?",
+    "What is the difference between `==` and `===` in JavaScript?",
+    "Could you explain closures in JavaScript and give an example?",
+    "What is a lambda function in Python, and when is it useful?",
+    "How does memory management work in C/C++?",
+    "Why are package managers like npm or pip so important in software development?",
+    "What makes Rust stand out, and why is it becoming more popular?",
+    "How do SQL databases differ from NoSQL databases in terms of use and structure?",
+    "How does a hash table work, and when would you use it?",
+    "What is the difference between a binary search tree and a binary heap?",
+    "Could you walk through how quicksort operates?",
+    "What is a linked list, and how do its different types vary?",
+    "Why would you use a heap data structure in certain situations?",
+    "How do you represent a graph in programming?",
+    "What is the difference between depth-first search and breadth-first search?",
+    "Can you explain various sorting algorithms and how they compare to each other?",
+    "What is dynamic programming, and what kinds of problems is it useful for solving?",
+    "What is the time complexity of bubble sort, and why is it inefficient?",
+    "How does a greedy algorithm differ from a divide-and-conquer algorithm?",
+    "Could you explain how merge sort works and why it is efficient?",
+    "What is a priority queue, and when might it be used?",
+    "What is a trie data structure, and how does it function?",
+    "What is a stack overflow, and what causes it?",
+    "What are the key differences between singly and doubly linked lists?",
+    "Why is big-O notation important when analyzing algorithms?",
+    "Why is version control essential in software development?",
+    "What distinguishes Git from SVN as version control systems?",
+    "Why should developers write unit tests for their code?",
+    "What is a continuous integration pipeline, and how does it help in development?",
+    "Can you explain the difference between white-box and black-box testing?",
+    "What does code refactoring involve, and why is it necessary?",
+    "Can you explain the SOLID principles in object-oriented design?",
+    "Why do we need build tools like Maven or Gradle?",
+    "How does the Model-View-Controller (MVC) pattern work in software design?",
+    "What is Test-Driven Development (TDD), and how does it influence coding practices?",
+    "How does an integrated development environment (IDE) differ from a simple text editor?",
+    "What are microservices, and how do they differ from monolithic architecture?",
+    "What advantages do microservices provide over monolithic systems?",
+    "What is containerization, and how does it benefit modern development practices?",
+    "How does Docker fit into the development process, and why is it important?",
+    "What's the difference between front-end and back-end development?",
+    "What is HTML, and what role does it serve in creating web pages?",
+    "What is CSS, and how does it complement HTML?",
+    "What are the main uses of JavaScript frameworks such as React or Angular?",
+    "What is AJAX, and how does it help make web applications more dynamic?",
+    "Can you explain what a RESTful API is and how it works?",
+    "What is the purpose of a web server like Apache or Nginx?",
+    "How do databases play a role in web application development?",
+    "What are cookies, and how do they help manage sessions on websites?",
+    "What's the difference between client-side and server-side rendering?",
+    "Why is HTTPS important for secure communication between a browser and a server?",
+    "What does database normalization involve, and why is it important?",
+    "Can you explain how SQL joins work and give examples?",
+    "What is the difference between a primary key and a foreign key in databases?",
+    "Why are indexes used in databases, and what benefits do they offer?",
+    "What does ACID stand for in database transactions, and why is it important?",
+    "What is concurrency in programming, and how is it handled in multi-threaded environments?",
+    "Why would you use a memory leak detector in software development?",
+    "What does the Singleton design pattern solve, and how is it implemented?",
+    "What's the difference between synchronous and asynchronous programming?"
 ]
 
 generator = ActivationDatasetGenerator()
+print(generator.get_layers())
 generator.process_dataset(prompts)
 
 

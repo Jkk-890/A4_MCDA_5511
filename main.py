@@ -14,10 +14,10 @@ import matplotlib.pyplot as plt
 class NewModel(nn.Module):
     def __init__(self, *args):
         super().__init__(*args)
-        self.pretrained = GPTNeoForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
-        self.tokenizer = GPT2Tokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
-        # self.pretrained = AutoModelForCausalLM.from_pretrained("unsloth/phi-4")  # Use the Phi-4 model
-        # self.tokenizer = AutoTokenizer.from_pretrained("unsloth/phi-4")
+        #self.pretrained = GPTNeoForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
+        #self.tokenizer = GPT2Tokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
+        self.pretrained = AutoModelForCausalLM.from_pretrained("unsloth/phi-4")  # Use the Phi-4 model
+        self.tokenizer = AutoTokenizer.from_pretrained("unsloth/phi-4")
         self.output_layers = [1]
         self.selected_out = OrderedDict()
         self.fhooks = []
@@ -73,10 +73,10 @@ np.savetxt('tensor_output.txt', numpy_array.flatten())  # Flatten to store as a 
 ##############
 
 class ActivationDatasetGenerator:
-    def __init__(self, model_name="EleutherAI/gpt-neo-2.7B", device="cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(self, model_name="unsloth/phi-4", device="cuda" if torch.cuda.is_available() else "cpu"):
         self.device = device
-        self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-        self.model = GPTNeoForCausalLM.from_pretrained(model_name).to(self.device)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(model_name).to(self.device)
         self.model.eval()
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.activations = []
@@ -116,6 +116,7 @@ class ActivationDatasetGenerator:
         print(f"Dataset saved to {save_path}")
 
 # Example usage
+
 prompts = [
     "What is the best way to learn machine learning?",
     "Explain quantum computing in simple terms.",
@@ -138,79 +139,6 @@ prompts = [
 
 generator = ActivationDatasetGenerator()
 generator.process_dataset(prompts)
-
-import torch
-from transformers import GPT2LMHeadModel, GPT2Tokenizer,GPTNeoForCausalLM
-import json
-import numpy as np
-
-class ActivationDatasetGenerator:
-    def __init__(self, model_name="EleutherAI/gpt-neo-2.7B", device="cuda" if torch.cuda.is_available() else "cpu"):
-        self.device = device
-        self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-        self.model = GPTNeoForCausalLM.from_pretrained(model_name).to(self.device)
-        self.model.eval()
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.activations = []
-
-        def hook_fn(module, input, output):
-            self.activations = output[0].detach().cpu().numpy()  # Overwrite, not append
-
-        self.hook_layer = self.model.transformer.h[16]  # Middle layer (32 layers total)
-        self.hook_handle = self.hook_layer.register_forward_hook(hook_fn)
-
-    def generate_text_and_activations(self, prompt, max_length=50):
-        self.activations = []
-        inputs = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True).to(self.device)
-        with torch.no_grad():
-            output = self.model.generate(
-                inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                max_length=max_length,
-                pad_token_id=self.tokenizer.eos_token_id
-            )
-        text = self.tokenizer.decode(output[0], skip_special_tokens=True)
-        return text, self.activations if self.activations.size else None
-
-    def process_dataset(self, prompts, save_path="activations_data.json"):
-        dataset = []
-        for idx, prompt in enumerate(prompts):
-            print(f"Processing {idx+1}/{len(prompts)}: {prompt[:50]}...")
-            text, activation = self.generate_text_and_activations(prompt)
-            if activation is not None:
-                dataset.append({
-                    "prompt": prompt,
-                    "generated_text": text,
-                    "activations": activation.tolist()
-                })
-        with open(save_path, "w") as f:
-            json.dump(dataset, f, indent=4)
-        print(f"Dataset saved to {save_path}")
-
-# Example usage
-if __name__ == "__main__":
-    prompts = [
-        "What is the best way to learn machine learning?",
-        "Explain quantum computing in simple terms.",
-        "Tell me a joke about programming.",
-        "What happens if you fall into a black hole?",
-        "Describe the future of artificial intelligence.",
-        "Write a Python function to reverse a linked list.",
-        "Explain why recursion is useful in programming.",
-        "What is the role of a CPU in modern computing?",
-        "Explain how virtual memory works in an operating system.",
-        "What are the ethical challenges of artificial intelligence?",
-        "How does a neural network learn from data?",
-        "How does gradient descent optimize a machine learning model?",
-        "Explain the difference between supervised and unsupervised learning.",
-        "write python function to generate random numbers",
-        "What happens when you type a URL into a browser?"
-        "Explain the concept of cloud computing in simple terms."
-        
-    ]
-
-    generator = ActivationDatasetGenerator()
-    generator.process_dataset(prompts)
 
 ##############
 

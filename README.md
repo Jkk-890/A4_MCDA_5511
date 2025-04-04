@@ -1,3 +1,7 @@
+# Part 1
+
+Hooks are used to capture the intermediate outputs of selected layers with the goal of monitoring the model throughout the forward pass. We can analyze these layers to see how the model is thinking at that specific layer. We decided to put them in in the middle layers, we did this because the layers around the middle will have a nice mix of information that has been changed very little from its original state and ones that have been changed drastically. This was with the goal of seeing which activations had been altered and which had not been altered. In Anthropic's paper they state “We chose to focus on the middle layer of the model because we reasoned that it is likely to contain interesting, abstract features” they say “this is due to the residual stream is smaller than the MLP layer, making SAE training and inference computationally cheaper “ and for cross-layer superposition which is essentially when features are distributed across more than one layer in a model, rather than being in a specific layer. The limitations of this approach are that naturally you do not see the state of the layers at the beginning or end, thus you miss how the initial input and the final product look like. Focusing on these few layers, we don’t see the full picture of the decision-making process that these hooks provide for us.  
+
 # Analyzing Latent Dimensions in LLM Activations
 
 ## Overview

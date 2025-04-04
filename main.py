@@ -1,10 +1,9 @@
-from transformers import GPTNeoForCausalLM, GPT2Tokenizer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from collections import OrderedDict
-import numpy as np 
+import numpy as np
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import json
 from sklearn.decomposition import PCA
@@ -14,10 +13,8 @@ import matplotlib.pyplot as plt
 class NewModel(nn.Module):
     def __init__(self, *args):
         super().__init__(*args)
-        #self.pretrained = GPTNeoForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
-        #self.tokenizer = GPT2Tokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
-        self.pretrained = AutoModelForCausalLM.from_pretrained("unsloth/phi-4")  # Use the Phi-4 model
-        self.tokenizer = AutoTokenizer.from_pretrained("unsloth/phi-4")
+        self.pretrained = AutoModelForCausalLM.from_pretrained("unsloth/Meta-Llama-3.1-8B-Instruct")
+        self.tokenizer = AutoTokenizer.from_pretrained("unsloth/Meta-Llama-3.1-8B-Instruct")
         self.output_layers = [1]
         self.selected_out = OrderedDict()
         self.fhooks = []
@@ -34,6 +31,7 @@ class NewModel(nn.Module):
     def forward(self, x):
         out = self.pretrained(x)
         return out, self.selected_out
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -73,7 +71,7 @@ np.savetxt('tensor_output.txt', numpy_array.flatten())  # Flatten to store as a 
 ##############
 
 class ActivationDatasetGenerator:
-    def __init__(self, model_name="unsloth/phi-4", device="cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(self, model_name="unsloth/Meta-Llama-3.1-8B-Instruct", device="cuda" if torch.cuda.is_available() else "cpu"):
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(model_name).to(self.device)
@@ -84,7 +82,8 @@ class ActivationDatasetGenerator:
         def hook_fn(module, input, output):
             self.activations = output[0].detach().cpu().numpy()  # Overwrite, not append
 
-        self.hook_layer = self.model.transformer.h[16]  # Middle layer (32 layers total)
+        # Access the correct layer (layer 16 in this case)
+        self.hook_layer = self.model.model.layers[16]
         self.hook_handle = self.hook_layer.register_forward_hook(hook_fn)
 
     def generate_text_and_activations(self, prompt, max_length=50):
@@ -116,7 +115,6 @@ class ActivationDatasetGenerator:
         print(f"Dataset saved to {save_path}")
 
 # Example usage
-
 prompts = [
     "What is the best way to learn machine learning?",
     "Explain quantum computing in simple terms.",
@@ -131,14 +129,14 @@ prompts = [
     "How does a neural network learn from data?",
     "How does gradient descent optimize a machine learning model?",
     "Explain the difference between supervised and unsupervised learning.",
-    "write python function to generate random numbers",
-    "What happens when you type a URL into a browser?"
+    "Write python function to generate random numbers",
+    "What happens when you type a URL into a browser?",
     "Explain the concept of cloud computing in simple terms."
-    
 ]
 
 generator = ActivationDatasetGenerator()
 generator.process_dataset(prompts)
+
 
 ##############
 
@@ -157,7 +155,7 @@ def pad_activations(activations_batch):
 
 # Sparse Autoencoder class
 class SparseAutoencoder(nn.Module):
-    def __init__(self, input_dim=2560, encoder_dim=5120, sparsity_penalty=0.001):
+    def __init__(self, input_dim=4096, encoder_dim=4096*2, sparsity_penalty=0.001):
         super().__init__()
         self.encoder = nn.Sequential(nn.Linear(input_dim, encoder_dim), nn.ReLU(True))
         self.decoder = nn.Sequential(nn.Linear(encoder_dim, input_dim), nn.ReLU(True))
@@ -183,8 +181,8 @@ train_data = padded_activations[:train_size]
 val_data = padded_activations[train_size:]
 
 # Hyperparameters
-input_dim = 2560  # GPT-Neo-2.7B hidden size
-encoder_dim = 5120  # 2x input_dim
+input_dim = 4096  # unsloth/Meta-Llama-3.1-8B-Instruct hidden size
+encoder_dim = input_dim*2  # 2x input_dim
 sparsity_penalty = 0.001
 
 # Instantiate model and optimizer
@@ -311,16 +309,7 @@ def get_top_activating_texts(encoded_outputs, text_snippets, top_k=5):
 interpretable_features = get_top_activating_texts(encoded_outputs, text_snippets, top_k=5)
 
 # Print results for inspection
-for feat in interpretable_features[:10]:  # Check first 10 dimensions
-    print(f"--- Dimension {feat['dimension']} ---")
-    for i, (text, score) in enumerate(zip(feat["top_texts"], feat["activations"])):
-        print(f"{i+1}. ({score:.4f}) {text}")
-    print("\n")
-
-##############
-
-# Print results for inspection
-for feat in interpretable_features[:50]:  # Check first 10 dimensions
+for feat in interpretable_features[:50]:  # Check first 50 dimensions
     print(f"--- Dimension {feat['dimension']} ---")
     for i, (text, score) in enumerate(zip(feat["top_texts"], feat["activations"])):
         print(f"{i+1}. ({score:.4f}) {text}")

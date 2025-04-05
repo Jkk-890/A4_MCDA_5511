@@ -9,76 +9,6 @@ import json
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 
-class NewModel(nn.Module):
-    def __init__(self, *args):
-        super().__init__(*args)
-        self.pretrained = AutoModelForCausalLM.from_pretrained("unsloth/Meta-Llama-3.1-8B-Instruct")
-        self.tokenizer = AutoTokenizer.from_pretrained("unsloth/Meta-Llama-3.1-8B-Instruct")
-        
-        self.output_layers = [1]  # Specify the layer indices you want
-        self.selected_out = OrderedDict()
-        self.fhooks = []
-
-        # Register hooks for the layers
-        for i, l in enumerate(list(self.pretrained._modules.keys())):
-            if i in self.output_layers:  # Check if layer should be hooked
-                layer = getattr(self.pretrained, l)
-                self.fhooks.append(layer.register_forward_hook(self.forward_hook(l)))
-                
-    def forward_hook(self, layer_name):
-        """This function returns the hook function to be registered."""
-        def hook(module, input, output):
-            # Store output in selected_out using layer_name as key
-            self.selected_out[layer_name] = output
-        return hook
-
-    def forward(self, x):
-        out = self.pretrained(x)
-        return out, self.selected_out
-
-
-# Setup device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Move model to the correct device
-model = NewModel().to(device)
-
-# Define a sample prompt
-prompt = "Where is the best place to go for a vacation in the summer?"
-
-# Tokenize the input prompt
-input_ids = model.tokenizer(prompt, return_tensors="pt").input_ids.to(device)
-
-# Generate text using the model
-gen_tokens = model.pretrained.generate(
-    input_ids,
-    do_sample=True,
-    temperature=0.9,
-    max_length=100,
-)
-gen_text = model.tokenizer.batch_decode(gen_tokens)[0]
-
-# Print generated text
-print(gen_text)
-
-# Print the raw tensor output from the selected output layers
-print([value for value in model.selected_out.values()])
-
-# Extract the tensor from the selected output layers (assuming it's the first item)
-tensor = list(model.selected_out.values())[0]
-
-# Move the tensor to CPU if it's on GPU
-tensor_cpu = tensor.cpu()
-
-# Convert the tensor to a NumPy array
-numpy_array = tensor_cpu.detach().numpy()  # Detach from computation graph
-
-# Flatten the numpy array and save it to a text file
-np.savetxt('tensor_output.txt', numpy_array.flatten())  # Flatten to store as a single line of numbers
-
-
-##############
-
 class ActivationDatasetGenerator:
     def __init__(self, model_name="unsloth/Meta-Llama-3.1-8B-Instruct", device="cuda" if torch.cuda.is_available() else "cpu"):
         self.device = device
@@ -89,7 +19,7 @@ class ActivationDatasetGenerator:
         self.activations = []
 
         def hook_fn(module, input, output):
-            self.activations = output[0].detach().cpu().numpy()  # Overwrite, not appendnv
+            self.activations = output[0].detach().cpu().numpy()  # Overwrite, not append
 
         # Access the middle layer (layer 10 in this case)
         self.hook_layer = self.model.model.layers[10]
@@ -229,9 +159,7 @@ prompts = [
 ]
 
 generator = ActivationDatasetGenerator()
-print(generator.get_layers())
 generator.process_dataset(prompts)
-
 
 ##############
 

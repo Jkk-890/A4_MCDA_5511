@@ -1,8 +1,91 @@
-# Part 1
+# MCDA5511 Assignment #4: Sparse Autoencoder for LLM Interpretability
+## Part 1
 
 Hooks are used to capture the intermediate outputs of selected layers with the goal of monitoring the model throughout the forward pass. We can analyze these layers to see how the model is thinking at that specific layer. We decided to put them in in the middle layers, we did this because the layers around the middle will have a nice mix of information that has been changed very little from its original state and ones that have been changed drastically. This was with the goal of seeing which activations had been altered and which had not been altered. In Anthropic's paper they state “We chose to focus on the middle layer of the model because we reasoned that it is likely to contain interesting, abstract features” they say “this is due to the residual stream is smaller than the MLP layer, making SAE training and inference computationally cheaper “ and for cross-layer superposition which is essentially when features are distributed across more than one layer in a model, rather than being in a specific layer. The limitations of this approach are that naturally you do not see the state of the layers at the beginning or end, thus you miss how the initial input and the final product look like. Focusing on these few layers, we don’t see the full picture of the decision-making process that these hooks provide for us.  
 
-# Analyzing Latent Dimensions in LLM Activations
+---
+## Part 2: Generating Training Data for the Autoencoder
+
+This repository contains our implementation of a toy sparse autoencoder inspired by Anthropic’s *Scaling Monosemanticity: Extracting Interpretable Features from Claude 3 Sonnet* (May 2024). Below, we document our work for Parts 2 and 3, focusing on generating training data and training the sparse autoencoder. Parts 1, 4, 5, and 6 were completed by team members and are detailed elsewhere in this README.
+
+### Implementation
+We implemented an `ActivationDatasetGenerator` class to create training data for the sparse autoencoder:
+- **`generate_text_and_activations` Method**: Takes a prompt, tokenizes it, generates text using the `unsloth/Meta-Llama-3.1-8B-Instruct` model, and collects activations from layer 10 (a middle layer) via a forward hook.
+- **`process_dataset` Method**: Iterates over a list of prompts, calls `generate_text_and_activations`, and saves the results (prompts, generated text, and activations) to `activations_data.json` in JSON format. The activations are stored as lists to preserve mappings for later interpretation.
+
+### Corpus Selection
+We curated a corpus of 98 prompts focused on programming, computer science, and AI-related topics (e.g., "What is the best way to learn machine learning?", "Explain quantum computing in simple terms"). These prompts were chosen to:
+- Explore technical concepts where the model might exhibit distinct, interpretable features.
+- Ensure diversity in question types (explanatory, coding tasks, conceptual) to capture a range of model behaviors.
+- Keep the dataset manageable for computational constraints while providing sufficient data for training.
+
+### Summary Statistics
+- **Number of Prompts**: 98
+- **Average Generated Text Length**: Approximately 50 tokens (set by `max_length=50`)
+- **Total Activation Samples**: 98 (one per prompt, from layer 10)
+- **Activation Shape**: `(1, 1, 4096)` per sample, where 4096 is the hidden size of the Llama model
+- **Average Non-Zero Activation Values**: Approximately 90% of dimensions are non-zero in raw activations (pre-autoencoder), indicating dense initial representations.
+
+### Rationale
+We selected this corpus to focus on a domain of interest (computer science and AI) where interpretable features might emerge, such as responses to technical definitions or coding tasks. The moderate size balances computational feasibility with the need for diverse activation patterns.
+
+![part2.png](part2.png)
+
+- This plot shows the activation values from layer 10 for my 98 prompts. You can see they’re mostly non-zero and vary widely, which is why we need the autoencoder to simplify them.
+---
+For 
+Prompt=[
+"How do Python and Java differ from one another?",
+"What is dynamic typing, and how does it work in languages like Python?",
+"What purpose does the `self` keyword serve in Python?",
+"What is a lambda function in Python, and when is it useful?",
+"Write a Python function to reverse a linked list.",
+"Write python function to generate random numbers",
+"Describe the future of artificial intelligence.",
+"What is the best way to learn machine learning?",
+    "What are the ethical challenges of artificial intelligence?",
+"How does gradient descent optimize a machine learning model?",
+"Explain quantum computing in simple terms."
+]
+![part2_1.png](part2_1.png)
+
+![part2_2.png](part2_2.png)
+
+---
+
+## Part 3: Training the Sparse Autoencoder
+
+### Implementation
+We built a `SparseAutoencoder` class inspired by Cunningham et al. (2023) and Anthropic’s methodology:
+- **Structure**: Encoder-decoder with tied weights conceptually (though implemented separately here), using `nn.Linear` layers and ReLU activations. L1 regularization enforces sparsity on the encoded representation.
+- **Hyperparameters**:
+  - **Input/Output Dimension**: 4096 (matches Llama’s hidden size)
+  - **Encoder Dimension**: 8192 (2x input dimension)
+  - **L1 Penalty**: 0.001
+- **Training**: Used Adam optimizer (`lr=0.001`), MSE reconstruction loss, and early stopping (patience=5). Training metrics (reconstruction loss, L1 loss, sparsity) were tracked.
+
+### Hyperparameter Experiments
+We started with an encoder dimension of 8192 (2x input) and an L1 penalty of 0.001. Training showed rapid convergence to high sparsity (100% near-zero values by epoch 4), suggesting the L1 penalty might be too strong. We didn’t adjust further due to time constraints, but future experiments could lower it (e.g., 0.0001) to balance sparsity and reconstruction quality. Training ran for 50 epochs max, stopping early at epoch 6 when validation loss plateaued.
+
+### What the Autoencoder Does
+In *activation space*—the 4096-dimensional space of layer 10 activations from the Llama model—the autoencoder compresses these into an 8192-dimensional sparse feature space. Each dimension in this encoded space represents a potential "feature" (per Anthropic’s definition), such as a specific concept or behavior the model activates for (e.g., "programming concepts" or "explanatory responses"). The encoder maps dense activations to a sparse representation (mostly zeros), and the decoder reconstructs the original activations. Sparsity ensures only a few features are active per input, aiding interpretability.
+
+### Results
+- **Reconstruction Loss**: Final train loss = 0.0133, validation loss = 0.0142 (low, indicating good reconstruction)
+- **Sparsity**: Reached 100% near-zero values (<0.01) by epoch 4, suggesting overly aggressive sparsity
+- **Training Plot**: See `pca_plot.png` for a PCA visualization of encoded features (though this relates more to Part 4 analysis). Loss curves are not plotted but show a sharp drop then plateau.
+
+### Evidence of Sparsity
+By epoch 4, 100% of encoded dimensions were near-zero (threshold <0.01), as seen in the sparsity metric rising from 0.5578 (epoch 1) to 1.0000. While this confirms sparsity, it may indicate the model over-pruned features, potentially losing interpretability. Sample encoded outputs (e.g., from later analysis) show only a few dimensions with non-zero values (e.g., 0.0230, 0.0196), supporting sparsity but highlighting the need for tuning.
+
+![training_loss.png](training_loss.png)
+- Here’s how the loss dropped during training. The training loss fell fast from 17 to 0.013, and validation stabilized at 0.014, showing good learning before stopping at epoch 6
+
+![sparsity_curve.png](sparsity_curve.png)
+- This shows sparsity increasing to 100% by epoch 4. It means most encoded values are zero, which is great for isolating features. 
+
+---
+## Part 4: Analyzing Latent Dimensions in LLM Activations
 
 ## Overview
 
@@ -136,95 +219,3 @@ While this analysis successfully identified some potentially interpretable dimen
 ## Conclusion
 
 This preliminary analysis offers insights into how latent dimensions in LLMs can encode different types of knowledge. While some dimensions appear to align with interpretable themes such as AI ethics and programming concepts, others suffer from redundancy or a lack of clear separation between features. Future research could focus on fine-tuning the model's hyperparameters and carefully curating the dataset to achieve a more disentangled and interpretable latent space. This would involve exploring different values for `latent_dim` and potentially re-training the model with a dataset designed to encourage clearer feature separation. The analysis reveals a mixed landscape in the learned latent dimensions. While a subset of dimensions (17 out of 50) demonstrates diversity in the top-activating responses, a significant portion (33 out of 50) is dominated by a repeated, zero-scored question. This pattern strongly suggests a potential issue with the dataset generation process, where a substantial number of dimensions may not have been effectively populated with meaningful data. The presence of these default responses could obscure the true underlying features captured by those dimensions and warrants further investigation into the data generation pipeline. The dimensions with unique, high-scoring responses offer more promising avenues for understanding the LLM's internal representations of different knowledge domains.
-
-# Part 2
-
-# MCDA5511 Assignment #4: Sparse Autoencoder for LLM Interpretability
-
-This repository contains our implementation of a toy sparse autoencoder inspired by Anthropic’s *Scaling Monosemanticity: Extracting Interpretable Features from Claude 3 Sonnet* (May 2024). Below, we document our work for Parts 2 and 3, focusing on generating training data and training the sparse autoencoder. Parts 1, 4, 5, and 6 were completed by team members and are detailed elsewhere in this README.
-
----
-
-## Part 2: Generating Training Data for the Autoencoder
-
-### Implementation
-We implemented an `ActivationDatasetGenerator` class to create training data for the sparse autoencoder:
-- **`generate_text_and_activations` Method**: Takes a prompt, tokenizes it, generates text using the `unsloth/Meta-Llama-3.1-8B-Instruct` model, and collects activations from layer 10 (a middle layer) via a forward hook.
-- **`process_dataset` Method**: Iterates over a list of prompts, calls `generate_text_and_activations`, and saves the results (prompts, generated text, and activations) to `activations_data.json` in JSON format. The activations are stored as lists to preserve mappings for later interpretation.
-
-### Corpus Selection
-We curated a corpus of 98 prompts focused on programming, computer science, and AI-related topics (e.g., "What is the best way to learn machine learning?", "Explain quantum computing in simple terms"). These prompts were chosen to:
-- Explore technical concepts where the model might exhibit distinct, interpretable features.
-- Ensure diversity in question types (explanatory, coding tasks, conceptual) to capture a range of model behaviors.
-- Keep the dataset manageable for computational constraints while providing sufficient data for training.
-
-### Summary Statistics
-- **Number of Prompts**: 98
-- **Average Generated Text Length**: Approximately 50 tokens (set by `max_length=50`)
-- **Total Activation Samples**: 98 (one per prompt, from layer 10)
-- **Activation Shape**: `(1, 1, 4096)` per sample, where 4096 is the hidden size of the Llama model
-- **Average Non-Zero Activation Values**: Approximately 90% of dimensions are non-zero in raw activations (pre-autoencoder), indicating dense initial representations.
-
-### Rationale
-We selected this corpus to focus on a domain of interest (computer science and AI) where interpretable features might emerge, such as responses to technical definitions or coding tasks. The moderate size balances computational feasibility with the need for diverse activation patterns.
-
-![part2.png](part2.png)
-
-- This plot shows the activation values from layer 10 for my 98 prompts. You can see they’re mostly non-zero and vary widely, which is why we need the autoencoder to simplify them.
----
-For 
-Prompt=[
-"How do Python and Java differ from one another?",
-"What is dynamic typing, and how does it work in languages like Python?",
-"What purpose does the `self` keyword serve in Python?",
-"What is a lambda function in Python, and when is it useful?",
-"Write a Python function to reverse a linked list.",
-"Write python function to generate random numbers",
-"Describe the future of artificial intelligence.",
-"What is the best way to learn machine learning?",
-    "What are the ethical challenges of artificial intelligence?",
-"How does gradient descent optimize a machine learning model?",
-"Explain quantum computing in simple terms."
-]
-![part2_1.png](part2_1.png)
-
-![part2_2.png](part2_2.png)
-
-
-
-## Part 3: Training the Sparse Autoencoder
-
-### Implementation
-We built a `SparseAutoencoder` class inspired by Cunningham et al. (2023) and Anthropic’s methodology:
-- **Structure**: Encoder-decoder with tied weights conceptually (though implemented separately here), using `nn.Linear` layers and ReLU activations. L1 regularization enforces sparsity on the encoded representation.
-- **Hyperparameters**:
-  - **Input/Output Dimension**: 4096 (matches Llama’s hidden size)
-  - **Encoder Dimension**: 8192 (2x input dimension)
-  - **L1 Penalty**: 0.001
-- **Training**: Used Adam optimizer (`lr=0.001`), MSE reconstruction loss, and early stopping (patience=5). Training metrics (reconstruction loss, L1 loss, sparsity) were tracked.
-
-### Hyperparameter Experiments
-We started with an encoder dimension of 8192 (2x input) and an L1 penalty of 0.001. Training showed rapid convergence to high sparsity (100% near-zero values by epoch 4), suggesting the L1 penalty might be too strong. We didn’t adjust further due to time constraints, but future experiments could lower it (e.g., 0.0001) to balance sparsity and reconstruction quality. Training ran for 50 epochs max, stopping early at epoch 6 when validation loss plateaued.
-
-### What the Autoencoder Does
-In *activation space*—the 4096-dimensional space of layer 10 activations from the Llama model—the autoencoder compresses these into an 8192-dimensional sparse feature space. Each dimension in this encoded space represents a potential "feature" (per Anthropic’s definition), such as a specific concept or behavior the model activates for (e.g., "programming concepts" or "explanatory responses"). The encoder maps dense activations to a sparse representation (mostly zeros), and the decoder reconstructs the original activations. Sparsity ensures only a few features are active per input, aiding interpretability.
-
-### Results
-- **Reconstruction Loss**: Final train loss = 0.0133, validation loss = 0.0142 (low, indicating good reconstruction)
-- **Sparsity**: Reached 100% near-zero values (<0.01) by epoch 4, suggesting overly aggressive sparsity
-- **Training Plot**: See `pca_plot.png` for a PCA visualization of encoded features (though this relates more to Part 4 analysis). Loss curves are not plotted but show a sharp drop then plateau.
-
-### Evidence of Sparsity
-By epoch 4, 100% of encoded dimensions were near-zero (threshold <0.01), as seen in the sparsity metric rising from 0.5578 (epoch 1) to 1.0000. While this confirms sparsity, it may indicate the model over-pruned features, potentially losing interpretability. Sample encoded outputs (e.g., from later analysis) show only a few dimensions with non-zero values (e.g., 0.0230, 0.0196), supporting sparsity but highlighting the need for tuning.
-
-![training_loss.png](training_loss.png)
-- Here’s how the loss dropped during training. The training loss fell fast from 17 to 0.013, and validation stabilized at 0.014, showing good learning before stopping at epoch 6
-
-![sparsity_curve.png](sparsity_curve.png)
-- This shows sparsity increasing to 100% by epoch 4. It means most encoded values are zero, which is great for isolating features. 
-
-
-
-
-
----
